@@ -305,6 +305,37 @@ def print_process_table(procs: list[Process], label: str):
               f"{str(p.start_time):>7} {str(p.finish_time):>6} "
               f"{str(resp):>9} {str(turn):>8}")
 
+# Geração de um Workload controlado
+def generate_workload(n: int, scenario: str, seed: int = 42):
+    rng = random.Random(seed)
+    processes = []
+
+    for i in range(n):
+        pid = f"P{str(i+1).zfill(2)}"
+        arrival_time = rng.randint(0, 10)
+
+        if scenario == "curto":
+            burst_time = rng.randint(1, 5)
+
+        elif scenario == "longo":
+            burst_time = rng.randint(20, 50)
+
+        elif scenario == "misto":
+            if rng.random() < 0.5:
+                burst_time = rng.randint(1, 5)
+            else:
+                burst_time = rng.randint(20, 50)
+
+        else:
+            raise ValueError("Cenário inválido")
+
+        processes.append({
+            "pid": pid,
+            "arrival_time": arrival_time,
+            "burst_time": burst_time
+        })
+
+    return processes
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -336,88 +367,96 @@ def main():
     window_T = meta["throughput_window_T"]
     quantums = meta["rr_quantums"]
 
-    processes = load_processes(SPEC)
+    scenarios = ["curto", "longo", "misto"] # Define o cenário de carga de trabalho que vai ser avaliado, existem ["curto", "longo", "misto"]
 
-    print(f"\n{'═'*70}")
-    print(f"  {BOLD}SIMULADOR DE ESCALONAMENTO — RR vs SRTF{RESET}")
-    print(f"{'═'*70}")
-    print(f"  Processos: {len(processes)} | Custo troca de contexto: {ctx_cost} tick(s)")
-    print(f"  Janela de vazão: T = {window_T}")
+    for scenario in scenarios:
+        print(f"\n{'='*70}")
+        print(f"  CENÁRIO: {scenario.upper()}")
+        print(f"{'='*70}")
 
-    print(f"\n  {BOLD}Carga de trabalho:{RESET}")
-    print(f"  {'PID':<6} {'Chegada':>8} {'Burst':>6}")
-    print("  " + "─" * 24)
-    for p in processes:
-        print(f"  {p.pid:<6} {p.arrival_time:>8} {p.burst_time:>6}")
+        SPEC["workload"]["processes"] = generate_workload(5, scenario)
+        processes = load_processes(SPEC)
 
-    results = {}
+        print(f"\n{'═'*70}")
+        print(f"  {BOLD}SIMULADOR DE ESCALONAMENTO — RR vs SRTF{RESET}")
+        print(f"{'═'*70}")
+        print(f"  Processos: {len(processes)} | Custo troca de contexto: {ctx_cost} tick(s)")
+        print(f"  Janela de vazão: T = {window_T}")
 
-    # ── RR ────────────────────────────────────────────────────────────────────
-    print(f"\n{'─'*70}")
-    print(f"  {BOLD}ROUND ROBIN (RR){RESET}")
-    print(f"{'─'*70}")
+        print(f"\n  {BOLD}Carga de trabalho:{RESET}")
+        print(f"  {'PID':<6} {'Chegada':>8} {'Burst':>6}")
+        print("  " + "─" * 24)
+        for p in processes:
+            print(f"  {p.pid:<6} {p.arrival_time:>8} {p.burst_time:>6}")
 
-    for q in quantums:
-        label = f"RR (quantum={q})"
-        timeline, procs_done = simulate_rr(processes, q, ctx_cost)
+        results = {}
+
+        # ── RR ────────────────────────────────────────────────────────────────────
+        print(f"\n{'─'*70}")
+        print(f"  {BOLD}ROUND ROBIN (RR){RESET}")
+        print(f"{'─'*70}")
+
+        for q in quantums:
+            label = f"RR (quantum={q})"
+            timeline, procs_done = simulate_rr(processes, q, ctx_cost)
+            metrics = compute_metrics(procs_done, window_T)
+            results[label] = metrics
+            print_timeline(timeline, label)
+            print_process_table(procs_done, label)
+            print_metrics(metrics, label)
+
+        # ── SRTF ──────────────────────────────────────────────────────────────────
+        print(f"\n{'─'*70}")
+        print(f"  {BOLD}SRTF (Shortest Remaining Time First){RESET}")
+        print(f"{'─'*70}")
+
+        timeline, procs_done = simulate_srtf(processes, ctx_cost)
         metrics = compute_metrics(procs_done, window_T)
-        results[label] = metrics
-        print_timeline(timeline, label)
-        print_process_table(procs_done, label)
-        print_metrics(metrics, label)
-
-    # ── SRTF ──────────────────────────────────────────────────────────────────
-    print(f"\n{'─'*70}")
-    print(f"  {BOLD}SRTF (Shortest Remaining Time First){RESET}")
-    print(f"{'─'*70}")
-
-    timeline, procs_done = simulate_srtf(processes, ctx_cost)
-    metrics = compute_metrics(procs_done, window_T)
-    results["SRTF"] = metrics
-    print_timeline(timeline, "SRTF")
-    print_process_table(procs_done, "SRTF")
-    print_metrics(metrics, "SRTF")
+        results["SRTF"] = metrics
+        print_timeline(timeline, "SRTF")
+        print_process_table(procs_done, "SRTF")
+        print_metrics(metrics, "SRTF")
 
     # ── Tabela comparativa ────────────────────────────────────────────────────
-    print(f"\n{'═'*70}")
-    print(f"  {BOLD}COMPARATIVO GERAL{RESET}")
-    print(f"{'═'*70}")
-    print(f"  {'Algoritmo':<22} {'Resp. médio':>12} {'Ret. médio':>12} {'Vazão':>8}")
-    print("  " + "─" * 58)
-    for algo, m in results.items():
-        print(f"  {algo:<22} {m['avg_response']:>10.2f}   {m['avg_turnaround']:>10.2f}   {m['throughput']:>6}")
+        print(f"\n{'═'*70}")
+        print(f"  {BOLD}COMPARATIVO GERAL{RESET}")
+        print(f"{'═'*70}")
+        print(f"  {'Algoritmo':<22} {'Resp. médio':>12} {'Ret. médio':>12} {'Vazão':>8}")
+        print("  " + "─" * 58)
+        for algo, m in results.items():
+            print(f"  {algo:<22} {m['avg_response']:>10.2f}   {m['avg_turnaround']:>10.2f}   {m['throughput']:>6}")
 
-    # ── Análise ───────────────────────────────────────────────────────────────
-    print(f"\n{'═'*70}")
-    print(f"  {BOLD}ANÁLISE: VANTAGENS E DESVANTAGENS{RESET}")
-    print(f"{'═'*70}")
+        # ── Análise ───────────────────────────────────────────────────────────────
+        print(f"\n{'═'*70}")
+        print(f"  {BOLD}ANÁLISE: VANTAGENS E DESVANTAGENS{RESET}")
+        print(f"{'═'*70}")
 
-    print(f"""
-  {BOLD}Round Robin (RR){RESET}
-  ┌─────────────────────────────────────────────────────────┐
-  │ Vantagens                                               │
-  │  • Fairness: todos os processos recebem fatias iguais   │
-  │  • Bom tempo de resposta para processos curtos (q peq.) │
-  │  • Ausência de inanição                                 │
-  ├─────────────────────────────────────────────────────────┤
-  │ Desvantagens                                            │
-  │  • Quantum pequeno → alto overhead de troca de contexto │
-  │  • Quantum grande → degenera para FCFS                  │
-  │  • Processos curtos podem esperar por processos longos  │
-  └─────────────────────────────────────────────────────────┘
+        print(f"""
+    {BOLD}Round Robin (RR){RESET}
+    ┌─────────────────────────────────────────────────────────┐
+    │ Vantagens                                               │
+    │  • Fairness: todos os processos recebem fatias iguais   │
+    │  • Bom tempo de resposta para processos curtos (q peq.) │
+    │  • Ausência de inanição                                 │
+    ├─────────────────────────────────────────────────────────┤
+    │ Desvantagens                                            │
+    │  • Quantum pequeno → alto overhead de troca de contexto │
+    │  • Quantum grande → degenera para FCFS                  │
+    │  • Processos curtos podem esperar por processos longos  │
+    └─────────────────────────────────────────────────────────┘
 
-  {BOLD}SRTF (Shortest Remaining Time First){RESET}
-  ┌─────────────────────────────────────────────────────────┐
-  │ Vantagens                                               │
-  │  • Minimiza o tempo médio de retorno (ótimo teórico)    │
-  │  • Processos curtos terminam rapidamente                │
-  ├─────────────────────────────────────────────────────────┤
-  │ Desvantagens                                            │
-  │  • Inanição: processos longos podem esperar para sempre │
-  │  • Requer conhecimento prévio do burst time             │
-  │  • Alto overhead se muitos processos curtos chegam      │
-  └─────────────────────────────────────────────────────────┘
-""")
+    {BOLD}SRTF (Shortest Remaining Time First){RESET}
+    ┌─────────────────────────────────────────────────────────┐
+    │ Vantagens                                               │
+    │  • Minimiza o tempo médio de retorno (ótimo teórico)    │
+    │  • Processos curtos terminam rapidamente                │
+    ├─────────────────────────────────────────────────────────┤
+    │ Desvantagens                                            │
+    │  • Inanição: processos longos podem esperar para sempre │
+    │  • Requer conhecimento prévio do burst time             │
+    │  • Alto overhead se muitos processos curtos chegam      │
+    └─────────────────────────────────────────────────────────┘
+    """)
 
 
 if __name__ == "__main__":
