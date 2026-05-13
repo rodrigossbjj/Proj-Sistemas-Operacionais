@@ -155,6 +155,55 @@ def run_unfair(animals: list[Animal]) -> None:
     print_summary(sign_state, entry_order, exit_order, wait_times)
 
 
+def run_fair(animals: list[Animal]) -> None:
+    print("MODE: fair")
+    print("Policy: once the opposite species is waiting, new same-species arrivals are held back.")
+    print()
+
+    time = 0
+    sign_state = EMPTY
+    next_arrival = 0
+    waiting: list[Animal] = []
+    inside: list[Stay] = []
+    entry_order: list[str] = []
+    exit_order: list[str] = []
+    wait_times: dict[str, int] = {}
+
+    while len(exit_order) < len(animals):
+        while next_arrival < len(animals) and animals[next_arrival].arrival_time == time:
+            animal = animals[next_arrival]
+            waiting.append(animal)
+            waiting.sort(key=lambda item: (item.arrival_time, item.id))
+            print(f"{time:04d} | ARRIVE | {animal.id} ({animal.species})")
+            next_arrival += 1
+
+        exiting = [stay for stay in inside if stay.exit_time == time]
+        for stay in sorted(exiting, key=lambda item: item.animal.id):
+            inside.remove(stay)
+            exit_order.append(stay.animal.id)
+            print(f"{time:04d} | EXIT   | {stay.animal.id} ({stay.animal.species})")
+
+        if not inside and sign_state != EMPTY:
+            sign_state = EMPTY
+            print(f"{time:04d} | SIGN   | EMPTY")
+
+        admitted = admit_fair(time, waiting, inside, sign_state, wait_times, entry_order)
+        if admitted and sign_state == EMPTY:
+            sign_state = STATE_BY_SPECIES[admitted[0].animal.species]
+            print(f"{time:04d} | SIGN   | {sign_state}")
+
+        for stay in admitted:
+            inside.append(stay)
+
+        if waiting:
+            blocked = ", ".join(animal.id for animal in waiting)
+            print(f"{time:04d} | WAIT   | {blocked}")
+
+        time += 1
+
+    print_summary(sign_state, entry_order, exit_order, wait_times)
+
+
 def admit_unfair(
     time: int,
     waiting: list[Animal],
@@ -186,6 +235,46 @@ def admit_unfair(
         raise SystemExit("Simulation error: DOG and CAT entered the room together")
 
     return admitted_stays
+
+
+def admit_fair(
+    time: int,
+    waiting: list[Animal],
+    inside: list[Stay],
+    sign_state: str,
+    wait_times: dict[str, int],
+    entry_order: list[str],
+) -> list[Stay]:
+    if not waiting:
+        return []
+
+    target_state = sign_state
+    if target_state == EMPTY:
+        target_state = STATE_BY_SPECIES[waiting[0].species]
+
+    allowed_species = SPECIES_BY_STATE[target_state]
+    if opposite_species_waiting(waiting, allowed_species) and inside:
+        return []
+
+    admitted_animals = [animal for animal in waiting if animal.species == allowed_species]
+    admitted_stays: list[Stay] = []
+
+    for animal in admitted_animals:
+        waiting.remove(animal)
+        wait_times[animal.id] = time - animal.arrival_time
+        entry_order.append(animal.id)
+        exit_time = time + animal.rest_duration
+        admitted_stays.append(Stay(animal, exit_time))
+        print(f"{time:04d} | ENTER  | {animal.id} ({animal.species}) exits_at={exit_time}")
+
+    if violates_exclusion(inside, admitted_stays):
+        raise SystemExit("Simulation error: DOG and CAT entered the room together")
+
+    return admitted_stays
+
+
+def opposite_species_waiting(waiting: list[Animal], species: str) -> bool:
+    return any(animal.species != species for animal in waiting)
 
 
 def violates_exclusion(inside: list[Stay], admitted: list[Stay]) -> bool:
@@ -226,7 +315,15 @@ def main() -> None:
         run_unfair(animals)
         return
 
-    raise SystemExit(f"Mode {args.mode!r} is not implemented yet. Implemented mode: unfair")
+    if args.mode == "fair":
+        run_fair(animals)
+        return
+
+    run_unfair(animals)
+    print()
+    print("=" * 72)
+    print()
+    run_fair(animals)
 
 
 if __name__ == "__main__":
