@@ -290,6 +290,8 @@ python synchronization/threading_SemaphoreManual.py
 **Arquivos:**
 - [`room-sync/vet_room.py`](./room-sync/vet_room.py) — simulador da sala veterinária
 - [`room-sync/input.json`](./room-sync/input.json) — entrada padronizada do enunciado
+- [`room-threads/vet_room_threads.py`](./room-threads/vet_room_threads.py) — versão concorrente com threads
+- [`room-threads/input.json`](./room-threads/input.json) — entrada da versão com threads
 
 ### Descrição
 
@@ -336,7 +338,6 @@ A simulação é determinística e avança por **ticks**, usando os campos `arri
 |--------|----------|-----------|
 | `unfair` | ✅ Possível | Animais da mesma espécie da placa atual continuam entrando mesmo com a outra espécie esperando |
 | `fair` | ❌ Evitada | Quando a espécie oposta está esperando, novas entradas da espécie atual são bloqueadas até a sala esvaziar |
-| `both` | Comparativo | Executa `unfair` e depois `fair` com a mesma entrada |
 
 #### Solução com possibilidade de inanição (`unfair`)
 
@@ -352,12 +353,28 @@ Essa política impede que novos animais ultrapassem indefinidamente a espécie o
 
 ### Como Executar
 
+#### Versão com threads
+
+```bash
+python room-threads/vet_room_threads.py --mode unfair --input room-threads/input.json
+python room-threads/vet_room_threads.py --mode fair --input room-threads/input.json
+```
+
+Essa versão cria uma thread por animal, usa `threading.Condition` para sincronizar o acesso à sala e converte os ticks do JSON em tempo real. A opção `--tick-seconds` controla a escala de tempo:
+
+```bash
+python room-threads/vet_room_threads.py --mode fair --input room-threads/input.json --tick-seconds 0.1
+```
+
+Como há threads reais e pequenos atrasos aleatórios, a ordem exata dos eventos pode variar entre execuções.
+
+#### Versão por simulação determinística
+
 ```bash
 cd room-sync
 
 python vet_room.py --mode unfair --input input.json
 python vet_room.py --mode fair --input input.json
-python vet_room.py --mode both --input input.json
 ```
 
 > Em ambientes onde `python` não aponta para Python 3, use `python3`.
