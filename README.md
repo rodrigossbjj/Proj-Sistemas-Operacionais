@@ -25,7 +25,7 @@ Este repositório contém as soluções para o **Trabalho 1** da disciplina de S
 |---|------|--------|---------|
 | 1 | Escalonamento | Simulação e comparação de RR e SRTF | `scheduler_sim.py` |
 | 2 | Sincronização | Programadores com semáforos (compilador + banco) | `synchronization/` |
-| 3 | Sincronização | Sala de repouso veterinária (cães e gatos) | *(em breve)* |
+| 3 | Sincronização | Sala de repouso veterinária (cães e gatos) | `room-sync/` |
 
 ---
 
@@ -39,6 +39,10 @@ Proj-Sistemas-Operacionais/
 ├── synchronization/
 │   ├── threading_Semaphore.py         # Questão 2 — Semáforo nativo do Python
 │   └── threading_SemaphoreManual.py   # Questão 2 — Semáforo implementado manualmente
+│
+├── room-sync/
+│   ├── input.json                     # Questão 3 — Entrada padronizada
+│   └── vet_room.py                    # Questão 3 — Simulação da sala veterinária
 │
 └── README.md
 ```
@@ -283,15 +287,22 @@ python synchronization/threading_SemaphoreManual.py
 ## Questão 3 — Hospital Veterinário (Cães e Gatos)
 
 **Valor:** 0,5 ponto  
-> ⚠️ **Implementação em desenvolvimento** — será adicionada em breve.
+**Arquivos:**
+- [`room-sync/vet_room.py`](./room-sync/vet_room.py) — simulador da sala veterinária
+- [`room-sync/input.json`](./room-sync/input.json) — entrada padronizada do enunciado
+- [`room-threads/vet_room_threads.py`](./room-threads/vet_room_threads.py) — versão concorrente com threads
+- [`room-threads/input.json`](./room-threads/input.json) — entrada da versão com threads
 
 ### Descrição
 
 Protocolo de sala de repouso em hospital veterinário com as seguintes regras:
 
-- Se há **cães** na sala → apenas outros cães podem entrar; gatos aguardam
-- Se há **gatos** na sala → apenas outros gatos podem entrar; cães aguardam
-- A sala pode estar em 3 estados: **EMPTY**, **DOGS**, **CATS**
+- Se há **cães** na sala, outros cães podem entrar, mas gatos aguardam.
+- Se há **gatos** na sala, outros gatos podem entrar, mas cães aguardam.
+- Cães e gatos nunca podem ocupar a sala ao mesmo tempo.
+- A placa da sala pode estar em apenas 3 estados: **EMPTY**, **DOGS**, **CATS**.
+
+A simulação é determinística e avança por **ticks**, usando os campos `arrival_time` e `rest_duration` do JSON.
 
 ### Formato de Entrada (JSON)
 
@@ -321,12 +332,70 @@ Protocolo de sala de repouso em hospital veterinário com as seguintes regras:
 }
 ```
 
-### Soluções Planejadas
+### Modos Implementados
 
 | Versão | Inanição | Mecanismo |
 |--------|----------|-----------|
-| Sem controle de inanição | ✅ Possível | Semáforos simples por espécie |
-| Com controle de inanição | ❌ Evitada | Alternância forçada + contador de turnos |
+| `unfair` | ✅ Possível | Animais da mesma espécie da placa atual continuam entrando mesmo com a outra espécie esperando |
+| `fair` | ❌ Evitada | Quando a espécie oposta está esperando, novas entradas da espécie atual são bloqueadas até a sala esvaziar |
+
+#### Solução com possibilidade de inanição (`unfair`)
+
+Quando a sala está vazia, entra o primeiro animal aguardando e a placa muda para a espécie dele. Enquanto a placa estiver em `DOGS`, cães podem continuar entrando; enquanto estiver em `CATS`, gatos podem continuar entrando.
+
+Essa política pode causar inanição porque uma sequência contínua de chegadas da espécie atual pode manter a placa ocupada, fazendo a espécie oposta esperar indefinidamente.
+
+#### Solução sem possibilidade de inanição (`fair`)
+
+Quando existe animal da espécie oposta aguardando, novas entradas da espécie que já está na sala são bloqueadas. O grupo atual termina seu descanso, a sala fica vazia, a placa muda e a espécie que estava aguardando recebe acesso.
+
+Essa política impede que novos animais ultrapassem indefinidamente a espécie oposta que já estava bloqueada.
+
+### Como Executar
+
+#### Versão com threads
+
+```bash
+python room-threads/vet_room_threads.py --mode unfair --input room-threads/input.json
+python room-threads/vet_room_threads.py --mode fair --input room-threads/input.json
+```
+
+Essa versão cria uma thread por animal, usa `threading.Condition` para sincronizar o acesso à sala e converte os ticks do JSON em tempo real. A opção `--tick-seconds` controla a escala de tempo:
+
+```bash
+python room-threads/vet_room_threads.py --mode fair --input room-threads/input.json --tick-seconds 0.1
+```
+
+Como há threads reais e pequenos atrasos aleatórios, a ordem exata dos eventos pode variar entre execuções.
+
+#### Versão por simulação determinística
+
+```bash
+cd room-sync
+
+python vet_room.py --mode unfair --input input.json
+python vet_room.py --mode fair --input input.json
+```
+
+> Em ambientes onde `python` não aponta para Python 3, use `python3`.
+
+### Saída
+
+O programa imprime um log por tick com:
+
+- `ARRIVE` — animal chegou ao hospital;
+- `ENTER` — animal entrou na sala e informa o tick previsto de saída;
+- `EXIT` — animal saiu da sala;
+- `SIGN` — alteração da placa da porta;
+- `WAIT` — animais bloqueados aguardando.
+
+Ao final, imprime um resumo com ordem de entrada, ordem de saída, tempo de espera por animal e estado final da placa.
+
+### Exemplo de Diferença entre os Modos
+
+Com a entrada padrão, no modo `unfair`, `D02` e `D03` entram enquanto `C01` já está esperando, pois a placa ainda está em `DOGS`.
+
+No modo `fair`, depois que `C01` chega e passa a esperar, novos cães são bloqueados. Quando `D01` sai, a sala muda para `CATS` e os gatos aguardando entram antes dos novos cães.
 
 ---
 
